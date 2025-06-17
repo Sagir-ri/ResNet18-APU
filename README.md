@@ -161,3 +161,94 @@ APU 由多个关键组件组成，采用分层架构设计：
 ### 指令格式
 
 指令为 32位值，包含以下字段：
+[31:30] opcode     - 操作类型 (00: 卷积, 01: 残差)
+[29:28] kernelSize - 核大小 (3 表示 3×3)
+[27:25] logInHW    - 输入高度/宽度的对数
+[24:21] logInC     - 输入通道数的对数
+[20:17] logOutC    - 输出通道数的对数
+[16:15] stride1    - 主步长
+[14:13] stride2    - 辅助步长（用于残差）
+[12:5]  wAddr      - 权重地址偏移
+[4:0]   bnAddr     - 批归一化地址偏移
+
+### 存储器布局
+
+- **ActSRAM (A)**: 1024 × 64位 - Pingpong 存储器之一
+- **OutSRAM (O)**: 1024 × 64位 - Pingpong 存储器之二
+- **权重 RAM**: 64个 RAM × 256 × 64位
+- **批归一化 RAM**: 64个 RAM × 32 × 13位
+- **指令 RAM**: 16 × 32位
+
+## ResNet18 测试
+
+项目包含一个全面的测试平台 (`tb_top.v`)，可以：
+- 加载完整的 ResNet18 网络参数
+- 执行端到端的 ResNet18 推理
+- 验证 Pingpong 机制的正确性
+- 测试残差连接的正确性
+- 支持完整的三层网络架构
+
+### 测试数据格式
+- 输入激活值：二进制格式文件
+- 权重文件：按 ResNet18 层组织的二进制格式文件
+  - `layer1.0.conv1.txt`, `layer1.0.conv2.txt`
+  - `layer1.1.conv1.txt`, `layer1.1.conv2.txt`
+  - `layer2.0.conv1.txt`, `layer2.0.conv2_combined.txt`
+  - `layer2.1.conv1.txt`, `layer2.1.conv2.txt`
+  - `layer3.0.conv1.txt`, `layer3.0.conv2_combined.txt`
+  - `layer3.1.conv1.txt`, `layer3.1.conv2.txt`
+- 批归一化参数：组合阈值文件
+  - `layer*.bn*_combined.txt`
+
+## 性能特征
+
+- **计算吞吐量**: 每周期 64 个并行乘加运算
+- **存储器带宽**: Pingpong 架构实现的高效内存利用
+- **延迟**: 流水线操作，可配置累加模式
+- **精度**: 1位权重，多位激活值，12位中间结果
+- **Pingpong 优势**: 零拷贝数据传输，提高整体性能
+
+## 文件组织
+├── Top.sv                           # 顶层集成 (Pingpong 控制)
+├── ahb_slave*.sv                    # AHB 总线接口
+├── addr_map.sv                      # 地址解码器
+├── ram_mux.sv                       # 存储器多路复用器
+├── WorkSheet.v                      # 指令排序器
+├── Ctrl.sv                          # 主控制器 (Pingpong 逻辑)
+├── template_FeatureProcessor.sv     # 激活值存储器 (A & O)
+├── InBuf.sv                         # 输入缓冲器 (Pingpong 支持)
+├── ComputeCoreGroup.sv             # 计算引擎
+├── SIMD.v                          # 批归一化
+├── tb_top.v                        # ResNet18 测试平台
+└── param_files/                    # ResNet18 参数文件目录
+├── input_binary.txt
+├── layer*.conv*.txt
+├── layer*.bn*_combined.txt
+└── data_out.txt
+
+## 系统要求
+
+- 兼容 SystemVerilog 的仿真器
+- ResNet18 权重和测试数据的存储器初始化文件
+- PYNQ板？
+
+## ResNet18 Pingpong 特性
+
+该加速器专为高效执行 ResNet18 二值神经网络而设计，具有以下特点：
+
+- **完整的 ResNet18 支持**: 实现了标准 ResNet18 的所有层
+- **Pingpong 架构**: A (ActSRAM) 和 O (OutSRAM) 交替作为输入输出
+- **残差连接**: 利用 Pingpong 机制实现高效的跳跃连接和残差学习
+- **批归一化**: 集成的批归一化处理单元
+- **零拷贝传输**: Pingpong 机制避免了额外的数据搬移
+- **流水线处理**: 多级流水线提高整体吞吐量
+- **灵活的配置**: 支持不同的特征图尺寸和通道数
+
+### Pingpong 优势
+
+1. **内存效率**: 两个存储器交替使用，避免数据冗余
+2. **计算连续性**: 一个存储器输出时，另一个同时准备输入
+3. **残差实现**: 天然支持 ResNet 的跳跃连接结构
+4. **带宽优化**: 减少内存访问冲突，提高带宽利用率
+
+这个 APU 能够完成从输入图像到最终分类结果的完整 ResNet18 推理过程，通过创新的 Pingpong 存储架构为边缘计算和嵌入式 AI 应用提供了高效的硬件解决方案。
